@@ -1,0 +1,227 @@
+{
+  "source_file": "ipotekabank-v1.xlsx",
+  "bank": "ipoteka",
+  "layout": "block+row",
+  "account_count": 7,
+  "active_account_count": 3,
+  "warnings": [],
+  "accounts": [
+    {
+      "account_number": "20208000505703819001",
+      "currency": "UZS",
+      "account_name": "SPACEZERO",
+      "period": "01.01.2025 - 31.12.2025",
+      "transaction_count": 149,
+      "total_debit": 1994471044.12,
+      "total_credit": 2000467243.2,
+      "reconciliation": {
+        "status": "pass",
+        "checks": {
+          "turnover": "pass",
+          "count": "pass",
+          "balance": "pass"
+        },
+        "messages": [],
+        "stated": {
+          "debit": 1994471044.12,
+          "credit": 2000467243.2,
+          "count": 149,
+          "opening_balance": 6470145.25,
+          "closing_balance": 12466344.33
+        },
+        "computed": {
+          "debit": 1994471044.12,
+          "credit": 2000467243.2,
+          "count": 149
+        }
+      },
+      "warnings": []
+    },
+    {
+      "account_number": "20208840805703819001",
+      "currency": "USD",
+      "account_name": "SPACEZERO",
+      "period": "01.01.2025 - 31.12.2025",
+      "transaction_count": 24,
+      "total_debit": 159270.0,
+      "total_credit": 159270.0,
+      "reconciliation": {
+        "status": "pass",
+        "checks": {
+          "turnover": "pass",
+          "count": "pass",
+          "balance": "pass"
+        },
+        "messages": [],
+        "stated": {
+          "debit": 159270.0,
+          "credit": 159270.0,
+          "count": 24,
+          "opening_balance": 0.0,
+          "closing_balance": 0.0
+        },
+        "computed": {
+          "debit": 159270.0,
+          "credit": 159270.0,
+          "count": 24
+        }
+      },
+      "warnings": []
+    },
+    {
+      "account_number": "20208978105703819001",
+      "currency": "EUR",
+      "account_name": "SPACEZERO",
+      "period": "01.01.2025 - 31.12.2025",
+      "transaction_count": 0,
+      "total_debit": 0.0,
+      "total_credit": 0.0,
+      "reconciliation": {
+        "status": "pass",
+        "checks": {
+          "turnover": "pass",
+          "count": "pass",
+          "balance": "pass"
+        },
+        "messages": [],
+        "stated": {
+          "debit": 0.0,
+          "credit": 0.0,
+          "count": 0,
+          "opening_balance": 0.0,
+          "closing_balance": 0.0
+        },
+        "computed": {
+          "debit": 0.0,
+          "credit": 0.0,
+          "count": 0
+        }
+      },
+      "warnings": []
+    },
+    {
+      "account_number": "22620000005703819001",
+      "currency": "UZS",
+      "account_name": "SPACEZERO",
+      "period": "01.01.2025 - 31.12.2025",
+      "transaction_count": 0,
+      "total_debit": 0.0,
+      "total_credit": 0.0,
+      "reconciliation": {
+        "status": "pass",
+        "checks": {
+          "turnover": "pass",
+          "count": "pass",
+          "balance": "pass"
+        },
+        "messages": [],
+        "stated": {
+          "debit": 0.0,
+          "credit": 0.0,
+          "count": 0,
+          "opening_balance": 0.0,
+          "closing_balance": 0.0
+        },
+        "computed": {
+          "debit": 0.0,
+          "credit": 0.0,
+          "count": 0
+        }
+      },
+      "warnings": []
+    },
+    {
+      "account_number": "23102000705703819001",
+      "currency": "UZS",
+      "account_name": "SPACEZERO",
+      "period": "01.01.2025 - 31.12.2025",
+      "transaction_count": 0,
+      "total_debit": 0.0,
+      "total_credit": 0.0,
+      "reconciliation": {
+        "status": "pass",
+        "checks": {
+          "turnover": "pass",
+          "count": "pass",
+          "balance": "pass"
+        },
+        "messages": [],
+        "stated": {
+          "debit": 0.0,
+          "credit": 0.0,
+          "count": 0,
+          "opening_balance": 0.0,
+          "closing_balance": 0.0
+        },
+        "computed": {
+          "debit": 0.0,
+          "credit": 0.0,
+          "count": 0
+        }
+      },
+      "warnings": []
+    },
+    {
+      "account_number": "23106000705703819001",
+      "currency": "UZS",
+      "account_name": "SPACEZERO",
+      "period": "01.01.2025 - 31.12.2025",
+      "transaction_count": 199,
+      "total_debit": 1695885435.07,
+      "total_credit": 1695885435.07,
+      "reconciliation": {
+        "status": "pass",
+        "checks": {
+          "turnover": "pass",
+          "count": "pass",
+          "balance": "pass"
+        },
+        "messages": [],
+        "stated": {
+          "debit": 1695885435.07,
+          "credit": 1695885435.07,
+          "count": 199,
+          "opening_balance": 0.0,
+          "closing_balance": 0.0
+        },
+        "computed": {
+          "debit": 1695885435.07,
+          "credit": 1695885435.07,
+          "count": 199
+        }
+      },
+      "warnings": []
+    },
+    {
+      "account_number": "23106000905703819200",
+      "currency": "UZS",
+      "account_name": "SPACEZERO",
+      "period": "01.01.2025 - 31.12.2025",
+      "transaction_count": 0,
+      "total_debit": 0.0,
+      "total_credit": 0.0,
+      "reconciliation": {
+        "status": "pass",
+        "checks": {
+          "turnover": "pass",
+          "count": "pass",
+          "balance": "pass"
+        },
+        "messages": [],
+        "stated": {
+          "debit": 0.0,
+          "credit": 0.0,
+          "count": 0,
+          "opening_balance": 0.0,
+          "closing_balance": 0.0
+        },
+        "computed": {
+          "debit": 0.0,
+          "credit": 0.0,
+          "count": 0
+        }
+      },
+      "warnings": []
+    }
+  ]
+}
