@@ -306,7 +306,12 @@ def _make_client(config: AIConfig):
             "The anthropic package is required for the AI engine. "
             "Install it with: pip install anthropic"
         ) from exc
-    return Anthropic(api_key=key)
+    # The SDK's own default timeout is generous (minutes). A conversion makes
+    # several sequential calls, so a single stalled one - a network hiccup
+    # reaching the API, an overloaded model - should fail fast with a clear
+    # AIError rather than leave the request (and the worker thread serving
+    # it) hanging far longer than any real batch takes.
+    return Anthropic(api_key=key, timeout=120.0)
 
 
 def _call(config: AIConfig, *, system: str, user: str, schema: dict,

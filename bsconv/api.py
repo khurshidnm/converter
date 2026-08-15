@@ -20,6 +20,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from .engine import (
     DEFAULT_NAME_STYLE, NAME_STYLE_CLEAN, NAME_STYLE_COMPOSITE, parse_file,
@@ -229,8 +230,12 @@ async def convert(
     if resolved_mode == "auto":
         resolved_mode = _choose_auto_mode(data, file.filename or "upload")
     try:
-        statement = _run_engine(
-            data, file.filename or "upload", mode=resolved_mode,
+        # _run_engine makes blocking network calls in AI mode; running it
+        # straight inside this coroutine would freeze the event loop - and
+        # therefore every other in-flight request, including /health - for
+        # the whole conversion. Run it in a worker thread instead.
+        statement = await run_in_threadpool(
+            _run_engine, data, file.filename or "upload", mode=resolved_mode,
             name_style=DEFAULT_NAME_STYLE, currency="UZS", verify=verify,
         )
     except HTTPException:
@@ -285,8 +290,8 @@ async def convert_batch(
             resolved_mode = _normalize_mode(mode, legacy_engine=engine, model=model)
             if resolved_mode == "auto":
                 resolved_mode = _choose_auto_mode(data, key)
-            statement = _run_engine(
-                data, key, mode=resolved_mode,
+            statement = await run_in_threadpool(
+                _run_engine, data, key, mode=resolved_mode,
                 name_style=DEFAULT_NAME_STYLE, currency="UZS", verify=verify,
             )
             payload = _payload(
