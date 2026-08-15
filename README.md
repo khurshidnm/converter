@@ -21,11 +21,11 @@ export ANTHROPIC_API_KEY=sk-ant-...  # required by the AI engine
 
 ## Three modes
 
-The API accepts either `mode` or `model` as the selector. The values are the same in both forms:
+The API supports exactly three processing modes:
 
-- `ai` / `model=ai` / `model-ai`
-- `offline` / `model=offline` / `model-offline`
-- `auto` / `model=auto` / `model-auto`
+- `mode=ai`
+- `mode=offline`
+- `mode=auto`
 
 | | `ai` | `offline` | `auto` |
 |---|---|---|---|
@@ -38,12 +38,6 @@ The API accepts either `mode` or `model` as the selector. The values are the sam
 Both `ai` and `offline` produce the same JSON schema and both go through the
 same reconciliation checks against the totals the bank printed, so an AI
 conversion is checked, not trusted.
-
-```bash
-python -m bsconv statement.xlsx -o out/ --engine ai       # force AI
-python -m bsconv statement.xlsx -o out/ --engine offline   # force offline
-python -m bsconv statement.xlsx -o out/ --engine auto      # simple -> offline, hard -> AI
-```
 
 The AI engine cross-checks itself against the rule engine by default and
 records any disagreement in the report — differing transaction counts or
@@ -84,21 +78,9 @@ Production OpenAPI: `https://converter.khurshid.uz/openapi.json`
 
 ```bash
 uvicorn bsconv.api:app --host 0.0.0.0 --port 8000
-
-# mode values
 curl -F "file=@statement.xlsx" "http://localhost:8000/convert?mode=offline"
 curl -F "file=@statement.xlsx" "http://localhost:8000/convert?mode=ai"
 curl -F "file=@statement.xlsx" "http://localhost:8000/convert?mode=auto"
-
-# model aliases
-curl -F "file=@statement.xlsx" "http://localhost:8000/convert?model=offline"
-curl -F "file=@statement.xlsx" "http://localhost:8000/convert?model=ai"
-curl -F "file=@statement.xlsx" "http://localhost:8000/convert?model=auto"
-
-# compatibility aliases
-curl -F "file=@statement.xlsx" "http://localhost:8000/convert?model=model-offline"
-curl -F "file=@statement.xlsx" "http://localhost:8000/convert?model=model-ai"
-curl -F "file=@statement.xlsx" "http://localhost:8000/convert?model=model-auto"
 
 # same routes on the live deployment
 curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert?mode=offline"
@@ -113,7 +95,7 @@ curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert?mode=auto"
 | `POST /convert` | one file → JSON |
 | `POST /convert/batch` | many files → keyed JSON |
 
-Query flags: `extended`, `include_empty`, `name_style`, `currency`, `strict`.
+Query flags: `extended`, `include_empty`, `strict`.
 
 ---
 

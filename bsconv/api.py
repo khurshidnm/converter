@@ -207,9 +207,6 @@ async def convert(
     file: UploadFile = File(..., description="Statement file"),
     extended: bool = Query(False, description="Include name, period, balances, INN"),
     include_empty: bool = Query(False, description="Include zero-activity accounts"),
-    name_style: str = Query(DEFAULT_NAME_STYLE,
-                            pattern=f"^({NAME_STYLE_CLEAN}|{NAME_STYLE_COMPOSITE})$"),
-    currency: str = Query("UZS", min_length=3, max_length=3),
     strict: bool = Query(False, description="422 if reconciliation fails"),
     mode: str | None = Query(
         None,
@@ -234,7 +231,7 @@ async def convert(
     try:
         statement = _run_engine(
             data, file.filename or "upload", mode=resolved_mode,
-            name_style=name_style, currency=currency.upper(), verify=verify,
+            name_style=DEFAULT_NAME_STYLE, currency="UZS", verify=verify,
         )
     except HTTPException:
         raise
@@ -264,9 +261,6 @@ async def convert_batch(
     files: list[UploadFile] = File(...),
     extended: bool = Query(False),
     include_empty: bool = Query(False),
-    name_style: str = Query(DEFAULT_NAME_STYLE,
-                            pattern=f"^({NAME_STYLE_CLEAN}|{NAME_STYLE_COMPOSITE})$"),
-    currency: str = Query("UZS", min_length=3, max_length=3),
     mode: str | None = Query(
         None,
         pattern="^(ai|offline|rules|auto|model-ai|model_ai|model-offline|model_offline|model-auto|model_auto)$",
@@ -292,8 +286,8 @@ async def convert_batch(
             if resolved_mode == "auto":
                 resolved_mode = _choose_auto_mode(data, key)
             statement = _run_engine(
-                data, key, mode=resolved_mode, name_style=name_style,
-                currency=currency.upper(), verify=verify,
+                data, key, mode=resolved_mode,
+                name_style=DEFAULT_NAME_STYLE, currency="UZS", verify=verify,
             )
             payload = _payload(
                 statement, extended=extended, include_empty=include_empty

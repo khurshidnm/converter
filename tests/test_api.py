@@ -99,6 +99,14 @@ def test_model_alias_is_accepted():
     assert response.json()["mode"] == "offline"
 
 
+def test_openapi_does_not_expose_name_style_and_currency():
+    schema = client.get("/openapi.json").json()
+    convert_params = schema["paths"]["/convert"]["post"]["parameters"]
+    names = {p["name"] for p in convert_params}
+    assert "name_style" not in names
+    assert "currency" not in names
+
+
 def test_auto_mode_prefers_offline_for_simple_files(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     path = SAMPLES / "aloqabank.xlsx"
