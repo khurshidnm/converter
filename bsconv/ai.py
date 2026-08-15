@@ -197,7 +197,9 @@ For each account report:
 - layout: "row" if one transaction occupies one row; "block" if a transaction spans several rows (amounts on the first, time and counterparty name on the second, payment purpose on the third).
 - columns: 0-based column index for each field. Use -1 when a field has no column of its own. If one column combines account, INN and name (captions like "Счет/ИНН" or "Корреспондент: Банк/Счет/ИНН"), give that same index for counterparty_account, counterparty_name and bank_code.
  
-Report only what the file states. Never invent an account number or a total. If a figure is absent, leave it empty rather than deriving it."""
+Report only what the file states. Never invent an account number or a total. If a figure is absent, leave it empty rather than deriving it.
+ 
+Never merge two account sections into one, and never split one section in two. Each account keeps its own transactions, its own currency and its own totals. Amounts in different currencies must never be added together: a file holding a UZS account and a USD account has two accounts, not one."""
  
 TRANSACTIONS_SYSTEM = """\
 You extract transactions from a bank statement export.
@@ -230,6 +232,11 @@ DATES
 - Excel date serials are converted before you see them.
  
 COUNTERPARTY
+- The correspondent details often arrive as one tagged string:
+      "МФО:00419 Счет:16401000605703819001 ИНН:310841562"
+  Segments are frequently EMPTY, most often a trailing "ИНН:" with nothing after it:
+      "МФО:00419 Счет:16401000605703819001 ИНН:"
+  Extract every segment that IS present. An empty ИНН means only that counterparty_inn is ""; the МФО and the Счет are still there and must still be reported. NEVER discard a field because a neighbouring field is blank.
 - counterparty_account: the 20-digit correspondent account, "" if absent.
 - counterparty_inn: the 9-digit taxpayer number, "" if absent. It is often appended to the counterparty name after padding spaces, or given as "ИНН:310841562", or as the middle segment of "account/INN/name". Treat "000000000" as absent.
 - counterparty_name: the counterparty's name ONLY, with the account and INN removed and whitespace collapsed.
@@ -240,8 +247,10 @@ COUNTERPARTY
 BLOCK LAYOUT
 In a block layout, one transaction spans several rows: the first carries the date, document number and amounts, the next carries the time and the counterparty name, and the rest carry the payment purpose. Merge them into one transaction and report the first row's index as source_row. Never emit a continuation line as its own transaction.
  
+Stop collecting a transaction's purpose at the FIRST of: the next row with an amount, a totals or balance row, or the start of the next account section ("Cправка о работе счета", "Лицевой счет", a bank branch line). The last transaction before a section break must not absorb the next section's header text into its payment_purpose.
+ 
 Copy values; do not interpret, translate, correct or summarise them. If a field is absent, return "" rather than guessing it."""
-
+ 
 
 # --------------------------------------------------------------------------
 # grid rendering
