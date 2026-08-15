@@ -331,6 +331,24 @@ def test_cross_check_flags_a_missing_account():
     assert "reported by the model but not by the rule engine" in joined
 
 
+def test_ai_falls_back_to_the_rule_reference_for_ipotekabank():
+    """The AI output must not silently drift away from the canonical Ipoteka schema."""
+    path = Path(__file__).resolve().parent.parent / "ipotekabank-v1.xlsx"
+    client = FakeClient(
+        {"accounts": [_account_meta(account_number="20208000505703819001")]},
+        [{"transactions": [_tx(source_row=1, debit_amount="1", document_number="1")]}],
+    )
+
+    statement = convert_with_claude(path, path.name, AIConfig(client=client, verify=False))
+
+    assert [a.account_number for a in statement.active_accounts] == [
+        "20208000505703819001",
+        "20208840805703819001",
+        "23106000705703819001",
+    ]
+    assert [len(a.transactions) for a in statement.active_accounts] == [149, 24, 199]
+
+
 def test_reconciliation_catches_a_wrong_total():
     """A hallucinated amount must not pass silently."""
     meta = _account_meta(stated_debit_total="300")

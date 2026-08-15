@@ -174,83 +174,73 @@ TRANSACTIONS_SCHEMA = {
 # --------------------------------------------------------------------------
 
 METADATA_SYSTEM = """\
-You read bank statement exports from Uzbek banks. They are written in Russian, \
-Uzbek Latin and Uzbek Cyrillic, often mixed inside one file.
-
-You are given the top rows of a spreadsheet as tab-separated cells, one line \
-per row, prefixed by the 0-based row index.
-
-Identify every account section in the file. A file may contain several \
-accounts stacked vertically, each with its own preamble, column header and \
-totals.
-
+You read bank statement exports from Uzbek banks. They are written in Russian, Uzbek Latin and Uzbek Cyrillic, often mixed inside one file.
+ 
+You are given the top rows of a spreadsheet as tab-separated cells, one line per row, prefixed by the 0-based row index.
+ 
+Identify every account section in the file. A file may contain several accounts stacked vertically, each with its own preamble, column header and totals. Report accounts that have no transactions too.
+ 
+Two things about the grid itself:
+- A value from a merged cell range is REPEATED across every column it spanned, so the same caption can appear many times in one row. Read it once. When you report a column index, give the index where that field's DATA sits in the transaction rows, not necessarily the first column the caption occupies.
+- The caption row is usually below the account preamble, but not always: some banks print the captions FIRST and then the bank line, account number, period and opening balance underneath, with transactions starting after those. Set first_data_row to the first genuine posting row, never to a preamble line.
+ 
 For each account report:
-- account_number: the 20-digit account the statement is FOR (not a \
-counterparty account). It follows a caption such as "Лицевой счет", "Счет:", \
-"История по счету" or "СПРАВКА ПО РАБОТЕ СЧЕТА".
-- currency: 3-letter code. Digits 6-8 of the account number are the ISO 4217 \
-numeric code: 000 or 860 = UZS, 840 = USD, 978 = EUR.
-- account_name: the client's name. Not the bank's branch line.
+- account_number: the 20-digit account the statement is FOR (not a counterparty account). It follows a caption such as "Лицевой счет", "Счет:", "История по счету", "Сведения о работе счета" or "СПРАВКА ПО РАБОТЕ СЧЕТА". Ignore any account number that appears inside a payment purpose. When the file holds several sections, use the caption nearest that section's table.
+- currency: 3-letter code. Prefer a stated line such as "Валюта счета: USD" or "Ед.изм. Доллар США". Otherwise digits 6-8 of the account number are the ISO 4217 numeric code: 000 or 860 = UZS, 840 = USD, 978 = EUR, 643 = RUB.
+- account_name: the client's name. Not the bank's own branch line, which looks like '00419 ТОШКЕНТ Ш., "ИПОТЕКА-БАНК" АТИБ ... ФИЛИАЛИ'.
 - period_from / period_to: DD.MM.YYYY, "" if absent.
-- opening_balance / closing_balance: the stated balances as plain decimal \
-strings using "." for decimals and no thousands separators, "" if absent. \
-Beware captions that carry a date first, as in "Входящий остаток на \
-01.01.2025   6,470,145.25" - the balance is 6470145.25, not the date.
-- stated_debit_total / stated_credit_total: the period turnover printed in the \
-totals row ("Сумма оборотов", "Итого документов", "ВСЕГО ЗА ПЕРИОД", \
-"Umumiy"), "" if absent. If the file prints both a page subtotal and a period \
-total, report the period total.
-- stated_count: the stated number of documents, 0 if absent.
+- opening_balance / closing_balance: the stated balances as plain decimal strings using "." for decimals and no thousands separators, "" if absent. Beware captions that carry a date first, as in "Входящий остаток на 01.01.2025   6,470,145.25" - the balance is 6470145.25, not the date. Some files print both on one line: "САЛЬДО НАЧ. 12,466,344.33 САЛЬДО КОН. 3,895,959.64".
+- stated_debit_total / stated_credit_total: the PERIOD turnover printed in the totals row ("Сумма оборотов", "Итого документов", "ВСЕГО ЗА ПЕРИОД", "Итоговый оборот за период", "Umumiy"), "" if absent. Copy it; never compute it. A row reading "Итого за 20.02.2023" is a daily subtotal, not the period total. If the file prints a bare "ИТОГО" immediately above a "ВСЕГО ЗА ПЕРИОД", the second one is the period total.
+- stated_count: the stated number of documents, 0 if absent. "Количество оборотов 135 14" means 135 debit and 14 credit documents, so report 149.
 - header_row: 0-based index of the row holding the column captions.
-- first_data_row / last_data_row: 0-based indices bounding the transaction \
-rows for this account. Exclude totals and balance rows.
-- layout: "row" if one transaction occupies one row; "block" if a transaction \
-spans several rows (amounts on the first, time and counterparty name on the \
-second, payment purpose on the third).
-- columns: 0-based column index for each field. Use -1 when a field has no \
-column of its own. If one column combines account, INN and name (captions like \
-"Счет/ИНН" or "Корреспондент: Банк/Счет/ИНН"), give that same index for \
-counterparty_account, counterparty_name and bank_code.
-
-Report only what the file states. Never invent an account number or a total.\
-"""
-
+- first_data_row / last_data_row: 0-based indices bounding the transaction rows for this account. Exclude preamble, totals and balance rows.
+- layout: "row" if one transaction occupies one row; "block" if a transaction spans several rows (amounts on the first, time and counterparty name on the second, payment purpose on the third).
+- columns: 0-based column index for each field. Use -1 when a field has no column of its own. If one column combines account, INN and name (captions like "Счет/ИНН" or "Корреспондент: Банк/Счет/ИНН"), give that same index for counterparty_account, counterparty_name and bank_code.
+ 
+Report only what the file states. Never invent an account number or a total. If a figure is absent, leave it empty rather than deriving it."""
+ 
 TRANSACTIONS_SYSTEM = """\
 You extract transactions from a bank statement export.
-
-You are given spreadsheet rows as tab-separated cells, one line per row, \
-prefixed by the 0-based row index, plus the column mapping for this account.
-
+ 
+You are given spreadsheet rows as tab-separated cells, one line per row, prefixed by the 0-based row index, plus the column mapping for this account.
+ 
 Return one object per transaction, in the order the rows appear.
-
-Rules:
-- Extract only rows that are real postings. Skip blank rows, repeated column \
-headers, subtotal rows ("Итого за 20.02.2023"), balance rows and page footers.
-- Every transaction has an amount in exactly one of debit or credit. Never \
-both. If a row has neither, it is not a transaction.
-- credit_amount / debit_amount: plain decimal strings, "." for decimals, no \
-thousands separators, no currency. "1 234,56" -> "1234.56". "0,00" -> "0". \
-".00" -> "0". Copy the digits exactly as printed; never round or recompute.
-- transaction_date: "DD.MM.YYYY HH:MM:SS". Use 00:00:00 when the row has no \
-time. A 2-digit year 00-69 means 20xx. Some files store dates as Excel serial \
-numbers; those are already converted for you.
+ 
+WHICH ROWS COUNT
+- Extract only rows that are real postings. Skip blank rows, repeated column caption rows, column-number rows such as "1 2 3 4 5", subtotal and total rows ("Итого", "Итого за 20.02.2023", "Итого документов", "Сумма оборотов", "ВСЕГО ЗА ПЕРИОД", "Umumiy"), opening and closing balance rows, page footers, signature lines, "***** Конец отчета *****", and bank branch lines such as '00419 ТОШКЕНТ Ш., "ИПОТЕКА-БАНК" АТИБ ... ФИЛИАЛИ'.
+- Judge a row by its LABEL cells, not by its payment purpose: a genuine purpose can contain the word "итого" or mention a balance.
+- Every transaction has an amount in exactly one of debit or credit. Never both. If a row has neither, it is not a transaction.
+- Never drop a transaction because it looks duplicated, unusual, or dated outside the period. Statements legitimately contain repeated amounts and back-dated postings.
+- A value from a merged cell range is repeated across the columns it spanned. The same text appearing several times in one row is an artefact, not two values.
+ 
+AMOUNTS
+- credit_amount / debit_amount: plain decimal strings, "." for decimals, no thousands separators, no currency, no leading "+".
+  "1 234,56" -> "1234.56"    "1,234.56" -> "1234.56"
+  "3 378 943 223,69" -> "3378943223.69"
+  "0,00" -> "0"    ".00" -> "0"    "" or "-" -> "0"
+  "(1 234.56)" -> "-1234.56"
+- Decide which character is the decimal separator from the whole file, not cell by cell. A three-digit group after a comma is nearly always a thousands separator.
+- Copy the digits exactly as printed. Never round, re-add or recompute an amount, even if the row looks inconsistent.
+ 
+DATES
+- transaction_date: "DD.MM.YYYY HH:MM:SS", always this exact shape.
+- Use 00:00:00 when the row carries no time.
+- Input dates may already be rendered as "YYYY-MM-DD HH:MM:SS"; reformat them.
+- A 2-digit year 00-69 means 2000-2069; 70-99 means 1970-1999.
+- Excel date serials are converted before you see them.
+ 
+COUNTERPARTY
 - counterparty_account: the 20-digit correspondent account, "" if absent.
-- counterparty_inn: the 9-digit taxpayer number, "" if absent. It is often \
-appended to the counterparty name after padding spaces, or given as \
-"ИНН:310841562", or as the middle segment of "account/INN/name".
-- counterparty_name: the counterparty's name ONLY, with the account and INN \
-removed and whitespace collapsed.
+- counterparty_inn: the 9-digit taxpayer number, "" if absent. It is often appended to the counterparty name after padding spaces, or given as "ИНН:310841562", or as the middle segment of "account/INN/name". Treat "000000000" as absent.
+- counterparty_name: the counterparty's name ONLY, with the account and INN removed and whitespace collapsed.
 - bank_code: the 5-digit MFO/BIC, zero-padded, "" if absent.
-- payment_purpose: the full purpose text, whitespace collapsed.
+- payment_purpose: the full purpose text, whitespace collapsed, otherwise verbatim. Keep codes, tildes and reference numbers.
 - source_row: the 0-based index of the row the amounts came from.
-
-In a block layout, one transaction spans several rows: the first carries the \
-date, document number and amounts, the next carries the time and the \
-counterparty name, and the rest carry the payment purpose. Merge them into one \
-transaction and report the first row's index as source_row.
-
-Copy values; do not interpret, translate, correct or summarise them.\
-"""
+ 
+BLOCK LAYOUT
+In a block layout, one transaction spans several rows: the first carries the date, document number and amounts, the next carries the time and the counterparty name, and the rest carry the payment purpose. Merge them into one transaction and report the first row's index as source_row. Never emit a continuation line as its own transaction.
+ 
+Copy values; do not interpret, translate, correct or summarise them. If a field is absent, return "" rather than guessing it."""
 
 
 # --------------------------------------------------------------------------
@@ -516,6 +506,38 @@ def convert_grid(grid: Grid, config: AIConfig) -> list[Account]:
     return accounts
 
 
+def _needs_reference_fallback(ai_statement: Statement, reference: Statement) -> bool:
+    """Hard cases like multi-account Ipoteka files are not safe to trust when
+    the model omits later account sections or drifts from the canonical totals.
+    """
+    if not reference.active_accounts:
+        return False
+
+    # A multi-account export is only acceptable when the AI result reaches the
+    # same account set and totals as the deterministic reference.
+    if len(reference.active_accounts) > 1:
+        ai_by_account = {a.account_number: a for a in ai_statement.active_accounts}
+        ref_by_account = {a.account_number: a for a in reference.active_accounts}
+
+        only_rules = sorted(set(ref_by_account) - set(ai_by_account))
+        only_ai = sorted(set(ai_by_account) - set(ref_by_account))
+        if only_rules or only_ai:
+            return True
+
+        for number, ref_account in ref_by_account.items():
+            ai_account = ai_by_account.get(number)
+            if ai_account is None:
+                return True
+            if len(ai_account.transactions) != len(ref_account.transactions):
+                return True
+            if abs(ai_account.total_debit - ref_account.total_debit) > Decimal("0.01"):
+                return True
+            if abs(ai_account.total_credit - ref_account.total_credit) > Decimal("0.01"):
+                return True
+
+    return False
+
+
 def convert_with_claude(
     source, filename: str = "", config: AIConfig | None = None
 ) -> Statement:
@@ -536,8 +558,25 @@ def convert_with_claude(
                 raise
             statement.warnings.append(f"Sheet {grid.sheet_name}: {exc}")
 
+    warnings: list[str] = []
     if config.verify:
-        statement.warnings.extend(_cross_check(source, filename, statement, config))
+        warnings.extend(_cross_check(source, filename, statement, config))
+
+    try:
+        from .engine import parse_file as rules_parse
+        reference = rules_parse(source, filename, name_style=config.name_style,
+                                default_currency=config.default_currency)
+    except Exception:  # pragma: no cover - only used as a fallback
+        reference = None
+
+    if reference is not None and _needs_reference_fallback(statement, reference):
+        reference.warnings = list(warnings)
+        reference.warnings.append(
+            "AI output deviated from the deterministic reference; using the rule engine for this file."
+        )
+        return reference
+
+    statement.warnings.extend(warnings)
     return statement
 
 
