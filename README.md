@@ -19,24 +19,24 @@ pip install -r requirements-api.txt  # + fastapi, uvicorn (for the REST API)
 export ANTHROPIC_API_KEY=sk-ant-...  # required by the AI engine
 ```
 
-## Two engines
+## Three modes
 
-| | `ai` (default) | `rules` |
-|---|---|---|
-| Reads the sheet with | Claude | column-detection rules |
-| Needs an API key | yes | no |
-| Cost per file | tokens | free |
-| Same input, same output | not guaranteed | guaranteed |
-| Unfamiliar bank layout | usually still works | may fail |
+| | `ai` | `offline` | `auto` |
+|---|---|---|---|
+| Reads the sheet with | Claude | column-detection rules | chooses offline for simple files, AI for harder ones |
+| Needs an API key | yes | no | only if the file is escalated to AI |
+| Cost per file | tokens | free | usually free, but may use AI on complex files |
+| Same input, same output | not guaranteed | guaranteed | deterministic by default, AI fallback when needed |
+| Unfamiliar bank layout | usually still works | may fail | adaptive |
 
-Both produce the identical JSON schema and both go through the same
-reconciliation against the totals the bank printed, so an AI conversion is
-checked, not trusted.
+Both `ai` and `offline` produce the same JSON schema and both go through the
+same reconciliation checks against the totals the bank printed, so an AI
+conversion is checked, not trusted.
 
 ```bash
-python -m bsconv statement.xlsx -o out/                  # ai
-python -m bsconv statement.xlsx -o out/ --engine rules   # no API key
-python -m bsconv statement.xlsx -o out/ --engine auto    # ai if key, else rules
+python -m bsconv statement.xlsx -o out/ --engine ai       # force AI
+python -m bsconv statement.xlsx -o out/ --engine offline   # force offline
+python -m bsconv statement.xlsx -o out/ --engine auto      # simple -> offline, hard -> AI
 ```
 
 The AI engine cross-checks itself against the rule engine by default and
@@ -74,7 +74,9 @@ python -m bsconv statement.xls -o out/ --strict     # exit 1 if totals disagree
 
 ```bash
 uvicorn bsconv.api:app --host 0.0.0.0 --port 8000
-curl -F "file=@statement.xlsx" http://localhost:8000/convert
+curl -F "file=@statement.xlsx" "http://localhost:8000/convert?mode=offline"
+curl -F "file=@statement.xlsx" "http://localhost:8000/convert?mode=ai"
+curl -F "file=@statement.xlsx" "http://localhost:8000/convert?mode=auto"
 ```
 
 | Endpoint | Purpose |

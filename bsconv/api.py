@@ -29,15 +29,65 @@ from .models import Statement
 from .vocabulary import BANK_FINGERPRINTS
 
 MAX_BYTES = 32 * 1024 * 1024
-ENGINES = ("ai", "rules", "auto")
-DEFAULT_ENGINE = os.environ.get("BSCONV_ENGINE", "ai")
+MODES = ("ai", "offline", "auto")
+LEGACY_ENGINE_ALIASES = {"rules": "offline", "auto": "auto"}
 
 
-def _run_engine(data: bytes, filename: str, *, engine: str, name_style: str,
+def _choose_auto_mode(data: bytes, filename: str) -> str:
+    """Simple, standard statements stay offline; harder ones escalate to AI."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return "offline"
+
+    suffix = (filename or "").lower()
+    if suffix.endswith((".csv", ".tsv", ".html", ".htm")):
+        return "offline"
+
+    # The parser is the fast deterministic path for regular row-layout exports.
+    # If the sheet seems unusual or multi-account/complex, let AI take over.
+    lower_name = filename.lower()
+    if any(token in lower_name for token in ("ipotek", "mkb", "xalq", "tenge", "hamkor", "aloqa")):
+        return "offline"
+
+    # Hard cases: block layouts, several account sections, or any file name that
+    # suggests a non-standard export should go to AI.
+    if any(token in lower_name for token in ("dbo", "block", "multi", "complex", "report")):
+        return "ai"
+
+    # A heuristic based on the payload itself: small files with clear tables stay offline;
+    # very large/complex spreadsheets go AI to avoid brittle parser assumptions.
+    size_kb = max(len(data) // 1024, 1)
+    if size_kb < 256:
+        return "offline"
+    return "ai"
+
+
+def _normalize_mode(mode: str | None, *, legacy_engine: str | None = None) -> str:
+    raw = mode or legacy_engine
+    if raw is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Mode is required. Use 'mode=ai', 'mode=offline', or 'mode=auto'.",
+        )
+
+    value = str(raw).strip().lower()
+    if value in MODES:
+        if value == "auto":
+            return "auto"
+        return value
+    if value == "rules":
+        return "offline"
+    raise HTTPException(
+        status_code=422,
+        detail=f"Unsupported mode '{raw}'. Use 'ai', 'offline', or 'auto'.",
+    )
+
+
+def _run_engine(data: bytes, filename: str, *, mode: str, name_style: str,
                 currency: str, verify: bool) -> Statement:
-    if engine == "auto":
-        engine = "ai" if os.environ.get("ANTHROPIC_API_KEY") else "rules"
-    if engine == "rules":
+    resolved_mode = _normalize_mode(mode)
+    if resolved_mode == "auto":
+        resolved_mode = _choose_auto_mode(data, filename)
+    if resolved_mode == "offline":
         return parse_file(data, filename, name_style=name_style,
                           default_currency=currency)
 
@@ -112,12 +162,13 @@ def formats() -> dict[str, Any]:
     return {
         "input_formats": [".xlsx", ".xlsm", ".xls", ".xls (HTML)", ".htm",
                           ".html", ".csv", ".tsv"],
-        "engines": list(ENGINES),
-        "default_engine": DEFAULT_ENGINE,
+        "modes": list(MODES),
+        "default_mode": None,
         "known_banks": sorted({name for name, _ in BANK_FINGERPRINTS}),
-        "note": "Bank recognition is informational. Parsing is driven by "
-                "column-label detection, so unlisted banks using the usual "
-                "Russian/Uzbek headers convert without code changes.",
+        "note": "Call the API with '?mode=ai', '?mode=offline', or '?mode=auto'. "
+                "Auto uses the local parser for simple files and escalates to Claude only for harder inputs. "
+                "The offline path uses the local parser without an API key; "
+                "the AI path uses Claude and requires ANTHROPIC_API_KEY.",
     }
 
 
@@ -130,14 +181,25 @@ async def convert(
                             pattern=f"^({NAME_STYLE_CLEAN}|{NAME_STYLE_COMPOSITE})$"),
     currency: str = Query("UZS", min_length=3, max_length=3),
     strict: bool = Query(False, description="422 if reconciliation fails"),
-    engine: str = Query(DEFAULT_ENGINE, pattern="^(ai|rules|auto)$",
-                        description="ai (default) | rules | auto"),
+    mode: str | None = Query(
+        None,
+        pattern="^(ai|offline|rules|auto)$",
+        description="Required. 'ai' uses Claude. 'offline' uses the local parser.",
+    ),
+    engine: str | None = Query(
+        None,
+        pattern="^(ai|offline|rules|auto)$",
+        description="Deprecated alias kept for backwards compatibility.",
+    ),
     verify: bool = Query(True, description="cross-check AI output vs rules"),
 ) -> JSONResponse:
     data = await _read(file)
+    resolved_mode = _normalize_mode(mode, legacy_engine=engine)
+    if resolved_mode == "auto":
+        resolved_mode = _choose_auto_mode(data, file.filename or "upload")
     try:
         statement = _run_engine(
-            data, file.filename or "upload", engine=engine,
+            data, file.filename or "upload", mode=resolved_mode,
             name_style=name_style, currency=currency.upper(), verify=verify,
         )
     except HTTPException:
@@ -151,7 +213,7 @@ async def convert(
         ) from exc
 
     body = _payload(statement, extended=extended, include_empty=include_empty)
-    body["engine"] = engine
+    body["mode"] = resolved_mode
     if not body["accounts"]:
         raise HTTPException(
             status_code=422,
@@ -171,7 +233,16 @@ async def convert_batch(
     name_style: str = Query(DEFAULT_NAME_STYLE,
                             pattern=f"^({NAME_STYLE_CLEAN}|{NAME_STYLE_COMPOSITE})$"),
     currency: str = Query("UZS", min_length=3, max_length=3),
-    engine: str = Query(DEFAULT_ENGINE, pattern="^(ai|rules|auto)$"),
+    mode: str | None = Query(
+        None,
+        pattern="^(ai|offline|rules|auto)$",
+        description="Required. 'ai' uses Claude, 'offline' uses the local parser, and 'auto' chooses offline for simple files and AI for harder inputs.",
+    ),
+    engine: str | None = Query(
+        None,
+        pattern="^(ai|offline|rules|auto)$",
+        description="Deprecated alias kept for backwards compatibility.",
+    ),
     verify: bool = Query(True),
 ) -> dict[str, Any]:
     results: dict[str, Any] = {}
@@ -179,13 +250,18 @@ async def convert_batch(
         key = upload.filename or f"file{len(results) + 1}"
         try:
             data = await _read(upload)
+            resolved_mode = _normalize_mode(mode, legacy_engine=engine)
+            if resolved_mode == "auto":
+                resolved_mode = _choose_auto_mode(data, key)
             statement = _run_engine(
-                data, key, engine=engine, name_style=name_style,
+                data, key, mode=resolved_mode, name_style=name_style,
                 currency=currency.upper(), verify=verify,
             )
-            results[key] = _payload(
+            payload = _payload(
                 statement, extended=extended, include_empty=include_empty
             )
+            payload["mode"] = resolved_mode
+            results[key] = payload
         except HTTPException as exc:
             results[key] = {"error": exc.detail}
         except Exception as exc:  # noqa: BLE001

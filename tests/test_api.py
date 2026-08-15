@@ -10,19 +10,19 @@ import pytest
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from bsconv.api import app  # noqa: E402
+from bsconv.api import _choose_auto_mode, app  # noqa: E402
 
 SAMPLES = Path(os.environ.get("BSCONV_SAMPLES", Path(__file__).parent.parent / "samples"))
 client = TestClient(app)
 
 
 def _upload(name: str, **params):
-    """Upload a sample. Defaults to the rule engine: these tests cover
-    parsing, and the AI engine needs an API key and network."""
+    """Upload a sample using an explicit mode. Offline mode is the default
+    path for parsing tests; AI mode requires an API key and network."""
     path = SAMPLES / name
     if not path.exists():
         pytest.skip(f"sample {name} not available")
-    params.setdefault("engine", "rules")
+    params.setdefault("mode", "offline")
     with open(path, "rb") as fh:
         return client.post("/convert", params=params,
                            files={"file": (name, fh.read())})
@@ -69,43 +69,62 @@ def test_strict_flags_the_partial_export():
     assert response.json()["reconciliation"]["status"] == "fail"
 
 
-def test_formats_advertises_the_engines():
+def test_formats_advertises_the_modes():
     body = client.get("/formats").json()
-    assert set(body["engines"]) == {"ai", "rules", "auto"}
-    assert body["default_engine"] in {"ai", "rules", "auto"}
+    assert set(body["modes"]) == {"ai", "offline", "auto"}
+    assert body["default_mode"] is None
 
 
-def test_ai_engine_without_a_key_returns_a_clear_error(monkeypatch):
+def test_mode_is_required():
+    path = SAMPLES / "aloqabank.xlsx"
+    if not path.exists():
+        pytest.skip("sample not available")
+    with open(path, "rb") as fh:
+        response = client.post("/convert", files={"file": ("aloqabank.xlsx", fh.read())})
+    assert response.status_code == 422
+    assert "mode" in response.json()["detail"].lower()
+
+
+def test_auto_mode_prefers_offline_for_simple_files(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    path = SAMPLES / "aloqabank.xlsx"
+    if not path.exists():
+        pytest.skip("sample not available")
+    with open(path, "rb") as fh:
+        assert _choose_auto_mode(fh.read(), path.name) == "offline"
+
+
+def test_ai_mode_without_a_key_returns_a_clear_error(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     path = SAMPLES / "tangebank.xlsx"
     if not path.exists():
         pytest.skip("sample not available")
     with open(path, "rb") as fh:
-        response = client.post("/convert", params={"engine": "ai"},
+        response = client.post("/convert", params={"mode": "ai"},
                                files={"file": ("tangebank.xlsx", fh.read())})
     assert response.status_code == 502
     assert "API key" in response.json()["detail"]
 
 
-def test_auto_engine_falls_back_to_rules_without_a_key(monkeypatch):
+def test_offline_mode_runs_without_a_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     path = SAMPLES / "tangebank.xlsx"
     if not path.exists():
         pytest.skip("sample not available")
     with open(path, "rb") as fh:
-        response = client.post("/convert", params={"engine": "auto"},
+        response = client.post("/convert", params={"mode": "offline"},
                                files={"file": ("tangebank.xlsx", fh.read())})
     assert response.status_code == 200
     assert response.json()["account"]["transaction_count"] == 24
 
 
 def test_rejects_garbage():
-    response = client.post("/convert", params={"engine": "rules"},
+    response = client.post("/convert", params={"mode": "offline"},
                            files={"file": ("x.bin", b"\x00\x01not a file")})
     assert response.status_code in (415, 422)
 
 
 def test_rejects_empty_file():
-    response = client.post("/convert", params={"engine": "rules"},
+    response = client.post("/convert", params={"mode": "offline"},
                            files={"file": ("empty.xlsx", b"")})
     assert response.status_code == 400

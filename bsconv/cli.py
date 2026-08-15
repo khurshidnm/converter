@@ -115,11 +115,28 @@ def _print_summary(statement: Statement) -> bool:
     return ok
 
 
+def _choose_auto_engine(path: Path) -> str:
+    """Keep simple files offline and escalate harder ones to AI."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return ENGINE_RULES
+
+    name = path.name.lower()
+    if any(token in name for token in ("ipotek", "mkb", "xalq", "tenge", "hamkor", "aloqa")):
+        return ENGINE_RULES
+    if any(token in name for token in ("dbo", "block", "multi", "complex", "report")):
+        return ENGINE_AI
+
+    size_kb = max(path.stat().st_size // 1024, 1)
+    if size_kb < 256:
+        return ENGINE_RULES
+    return ENGINE_AI
+
+
 def _convert(path: Path, args) -> Statement:
-    """Run the chosen engine. AI is the default; rules needs no API key."""
+    """Run the chosen engine. Auto decides between offline and AI by file complexity."""
     engine = args.engine
     if engine == ENGINE_AUTO:
-        engine = ENGINE_AI if os.environ.get("ANTHROPIC_API_KEY") else ENGINE_RULES
+        engine = _choose_auto_engine(path)
 
     if engine == ENGINE_RULES:
         return parse_file(path, path.name, name_style=args.name_style,
