@@ -21,6 +21,12 @@ export ANTHROPIC_API_KEY=sk-ant-...  # required by the AI engine
 
 ## Three modes
 
+The API accepts either `mode` or `model` as the selector. The values are the same in both forms:
+
+- `ai` / `model=ai` / `model-ai`
+- `offline` / `model=offline` / `model-offline`
+- `auto` / `model=auto` / `model-auto`
+
 | | `ai` | `offline` | `auto` |
 |---|---|---|---|
 | Reads the sheet with | Claude | column-detection rules | chooses offline for simple files, AI for harder ones |
@@ -78,9 +84,21 @@ Production OpenAPI: `https://converter.khurshid.uz/openapi.json`
 
 ```bash
 uvicorn bsconv.api:app --host 0.0.0.0 --port 8000
+
+# mode values
 curl -F "file=@statement.xlsx" "http://localhost:8000/convert?mode=offline"
 curl -F "file=@statement.xlsx" "http://localhost:8000/convert?mode=ai"
 curl -F "file=@statement.xlsx" "http://localhost:8000/convert?mode=auto"
+
+# model aliases
+curl -F "file=@statement.xlsx" "http://localhost:8000/convert?model=offline"
+curl -F "file=@statement.xlsx" "http://localhost:8000/convert?model=ai"
+curl -F "file=@statement.xlsx" "http://localhost:8000/convert?model=auto"
+
+# compatibility aliases
+curl -F "file=@statement.xlsx" "http://localhost:8000/convert?model=model-offline"
+curl -F "file=@statement.xlsx" "http://localhost:8000/convert?model=model-ai"
+curl -F "file=@statement.xlsx" "http://localhost:8000/convert?model=model-auto"
 
 # same routes on the live deployment
 curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert?mode=offline"

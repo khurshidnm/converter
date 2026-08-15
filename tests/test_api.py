@@ -85,6 +85,20 @@ def test_mode_is_required():
     assert "mode" in response.json()["detail"].lower()
 
 
+def test_model_alias_is_accepted():
+    path = SAMPLES / "aloqabank.xlsx"
+    if not path.exists():
+        pytest.skip("sample not available")
+    with open(path, "rb") as fh:
+        response = client.post(
+            "/convert",
+            params={"model": "offline"},
+            files={"file": (path.name, fh.read())},
+        )
+    assert response.status_code == 200
+    assert response.json()["mode"] == "offline"
+
+
 def test_auto_mode_prefers_offline_for_simple_files(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     path = SAMPLES / "aloqabank.xlsx"

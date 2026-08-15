@@ -31,6 +31,18 @@ from .vocabulary import BANK_FINGERPRINTS
 MAX_BYTES = 32 * 1024 * 1024
 MODES = ("ai", "offline", "auto")
 LEGACY_ENGINE_ALIASES = {"rules": "offline", "auto": "auto"}
+MODE_ALIASES = {
+    "ai": "ai",
+    "model-ai": "ai",
+    "model_ai": "ai",
+    "offline": "offline",
+    "model-offline": "offline",
+    "model_offline": "offline",
+    "auto": "auto",
+    "model-auto": "auto",
+    "model_auto": "auto",
+    "rules": "offline",
+}
 
 
 def _choose_auto_mode(data: bytes, filename: str) -> str:
@@ -61,24 +73,32 @@ def _choose_auto_mode(data: bytes, filename: str) -> str:
     return "ai"
 
 
-def _normalize_mode(mode: str | None, *, legacy_engine: str | None = None) -> str:
-    raw = mode or legacy_engine
+def _normalize_mode(
+    mode: str | None,
+    *,
+    legacy_engine: str | None = None,
+    model: str | None = None,
+) -> str:
+    raw = model or mode or legacy_engine
     if raw is None:
         raise HTTPException(
             status_code=422,
-            detail="Mode is required. Use 'mode=ai', 'mode=offline', or 'mode=auto'.",
+            detail=(
+                "Mode is required. Use 'mode=ai', 'model=ai', 'mode=offline', "
+                "'model=offline', 'mode=auto', or 'model=auto'."
+            ),
         )
 
     value = str(raw).strip().lower()
-    if value in MODES:
-        if value == "auto":
-            return "auto"
-        return value
-    if value == "rules":
-        return "offline"
+    mapped = MODE_ALIASES.get(value)
+    if mapped is not None:
+        return mapped
     raise HTTPException(
         status_code=422,
-        detail=f"Unsupported mode '{raw}'. Use 'ai', 'offline', or 'auto'.",
+        detail=(
+            f"Unsupported mode '{raw}'. Use 'ai', 'offline', 'auto', "
+            "'model=ai', 'model=offline', or 'model=auto'."
+        ),
     )
 
 
@@ -107,7 +127,9 @@ app = FastAPI(
     version="1.0.0",
     description=(
         "Converts Uzbek bank statement exports to a normalised JSON schema. "
-        "Use '?mode=ai', '?mode=offline', or '?mode=auto' on the /convert endpoint."
+        "Use '?mode=ai', '?model=ai', '?mode=offline', '?model=offline', "
+        "'?mode=auto', or '?model=auto' on the /convert endpoint. "
+        "The values 'model-ai', 'model-offline', and 'model-auto' are also accepted."
     ),
     servers=[
         {"url": "https://converter.khurshid.uz", "description": "Production"},
@@ -172,9 +194,10 @@ def formats() -> dict[str, Any]:
         "modes": list(MODES),
         "default_mode": None,
         "known_banks": sorted({name for name, _ in BANK_FINGERPRINTS}),
-        "note": "Call the API with '?mode=ai', '?mode=offline', or '?mode=auto'. "
-                "Auto uses the local parser for simple files and escalates to Claude only for harder inputs. "
-                "The offline path uses the local parser without an API key; "
+        "note": "Call the API with '?mode=ai', '?model=ai', '?mode=offline', '?model=offline', "
+                "'?mode=auto', or '?model=auto'. The values 'model-ai', 'model-offline', and "
+                "'model-auto' are also accepted. Auto uses the local parser for simple files and escalates "
+                "to Claude only for harder inputs. The offline path uses the local parser without an API key; "
                 "the AI path uses Claude and requires ANTHROPIC_API_KEY.",
     }
 
@@ -190,8 +213,12 @@ async def convert(
     strict: bool = Query(False, description="422 if reconciliation fails"),
     mode: str | None = Query(
         None,
-        pattern="^(ai|offline|rules|auto)$",
-        description="Required. 'ai' uses Claude. 'offline' uses the local parser.",
+        pattern="^(ai|offline|rules|auto|model-ai|model_ai|model-offline|model_offline|model-auto|model_auto)$",
+        description="Required. 'ai' uses Claude. 'offline' uses the local parser. You may also send 'model-ai', 'model-offline', or 'model-auto'.",
+    ),
+    model: str | None = Query(
+        None,
+        description="Alias for mode. Accepts 'ai', 'offline', 'auto', 'model-ai', 'model-offline', and 'model-auto'.",
     ),
     engine: str | None = Query(
         None,
@@ -201,7 +228,7 @@ async def convert(
     verify: bool = Query(True, description="cross-check AI output vs rules"),
 ) -> JSONResponse:
     data = await _read(file)
-    resolved_mode = _normalize_mode(mode, legacy_engine=engine)
+    resolved_mode = _normalize_mode(mode, legacy_engine=engine, model=model)
     if resolved_mode == "auto":
         resolved_mode = _choose_auto_mode(data, file.filename or "upload")
     try:
@@ -242,8 +269,12 @@ async def convert_batch(
     currency: str = Query("UZS", min_length=3, max_length=3),
     mode: str | None = Query(
         None,
-        pattern="^(ai|offline|rules|auto)$",
-        description="Required. 'ai' uses Claude, 'offline' uses the local parser, and 'auto' chooses offline for simple files and AI for harder inputs.",
+        pattern="^(ai|offline|rules|auto|model-ai|model_ai|model-offline|model_offline|model-auto|model_auto)$",
+        description="Required. 'ai' uses Claude, 'offline' uses the local parser, and 'auto' chooses offline for simple files and AI for harder inputs. 'model-ai', 'model-offline', and 'model-auto' are accepted aliases.",
+    ),
+    model: str | None = Query(
+        None,
+        description="Alias for mode. Accepts 'ai', 'offline', 'auto', 'model-ai', 'model-offline', and 'model-auto'.",
     ),
     engine: str | None = Query(
         None,
@@ -257,7 +288,7 @@ async def convert_batch(
         key = upload.filename or f"file{len(results) + 1}"
         try:
             data = await _read(upload)
-            resolved_mode = _normalize_mode(mode, legacy_engine=engine)
+            resolved_mode = _normalize_mode(mode, legacy_engine=engine, model=model)
             if resolved_mode == "auto":
                 resolved_mode = _choose_auto_mode(data, key)
             statement = _run_engine(
