@@ -105,7 +105,14 @@ def _run_engine(data: bytes, filename: str, *, mode: str, name_style: str,
 app = FastAPI(
     title="Bank Statement Converter",
     version="1.0.0",
-    description="Converts Uzbek bank statement exports to a normalised JSON schema.",
+    description=(
+        "Converts Uzbek bank statement exports to a normalised JSON schema. "
+        "Use '?mode=ai', '?mode=offline', or '?mode=auto' on the /convert endpoint."
+    ),
+    servers=[
+        {"url": "https://converter.khurshid.uz", "description": "Production"},
+        {"url": "http://localhost:8000", "description": "Local development"},
+    ],
 )
 
 

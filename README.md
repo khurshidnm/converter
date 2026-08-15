@@ -72,11 +72,20 @@ python -m bsconv statement.xls -o out/ --strict     # exit 1 if totals disagree
 
 **REST API**
 
+Production Swagger UI: `https://converter.khurshid.uz/docs`
+
+Production OpenAPI: `https://converter.khurshid.uz/openapi.json`
+
 ```bash
 uvicorn bsconv.api:app --host 0.0.0.0 --port 8000
 curl -F "file=@statement.xlsx" "http://localhost:8000/convert?mode=offline"
 curl -F "file=@statement.xlsx" "http://localhost:8000/convert?mode=ai"
 curl -F "file=@statement.xlsx" "http://localhost:8000/convert?mode=auto"
+
+# same routes on the live deployment
+curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert?mode=offline"
+curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert?mode=ai"
+curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert?mode=auto"
 ```
 
 | Endpoint | Purpose |
