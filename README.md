@@ -19,33 +19,70 @@ pip install -r requirements-api.txt  # + fastapi, uvicorn (for the REST API)
 export ANTHROPIC_API_KEY=sk-ant-...  # required by the AI engine
 ```
 
-## Three modes
+## Developer API documentation
 
-The API supports exactly three processing modes:
+Base URL:
+`https://converter.khurshid.uz`
 
-- `mode=ai`
+### Supported modes
+Use exactly one of these query parameters on the `/convert` endpoint:
+
 - `mode=offline`
+- `mode=ai`
 - `mode=auto`
 
-| | `ai` | `offline` | `auto` |
-|---|---|---|---|
-| Reads the sheet with | Claude | column-detection rules | chooses offline for simple files, AI for harder ones |
-| Needs an API key | yes | no | only if the file is escalated to AI |
-| Cost per file | tokens | free | usually free, but may use AI on complex files |
-| Same input, same output | not guaranteed | guaranteed | deterministic by default, AI fallback when needed |
-| Unfamiliar bank layout | usually still works | may fail | adaptive |
+### Mode descriptions
 
-Both `ai` and `offline` produce the same JSON schema and both go through the
-same reconciliation checks against the totals the bank printed, so an AI
-conversion is checked, not trusted.
+- `mode=offline`  
+  Uses the local deterministic parser. No Anthropic API key required.
 
-The AI engine cross-checks itself against the rule engine by default and
-records any disagreement in the report — differing transaction counts or
-totals. Turn it off with `--no-verify`.
+- `mode=ai`  
+  Uses Claude. Requires the server to have `ANTHROPIC_API_KEY` configured.
 
-The spreadsheet is still opened locally in both cases: the Messages API cannot
-read a binary `.xls`/`.xlsx`, so the file is converted to a cell grid first and
-that grid is what Claude sees.
+- `mode=auto`  
+  Automatically chooses offline for simple files and AI for harder files.
+
+### Health endpoint
+
+`GET /health`
+
+Response example:
+```json
+{"status": "ok"}
+```
+
+### Formats endpoint
+
+`GET /formats`
+
+Returns:
+- supported input formats
+- supported modes
+- known banks
+- notes about the offline/AI behavior
+
+### Convert endpoint
+
+`POST /convert`
+
+Form-data request:
+- key: `file`
+- value: uploaded statement file
+
+Required query parameter:
+- `mode=offline` or `mode=ai` or `mode=auto`
+
+Examples:
+```bash
+curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert?mode=offline"
+curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert?mode=ai"
+curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert?mode=auto"
+```
+
+### Notes
+- The API contract is intentionally simple: upload a file and select one processing mode.
+- The app handles parsing and normalization internally.
+- No extra query parameters are required for normal use.
 
 ## Use it three ways
 
