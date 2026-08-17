@@ -51,25 +51,6 @@ Response example:
 {"status": "ok"}
 ```
 
-### Metrics endpoint
-
-`GET /metrics`
-
-Daily and all-time counts of calls to the application endpoints (`/formats`,
-`/convert`, `/convert/transactions`, `/convert/batch`). `/health`, `/metrics`,
-the doc routes, and unmatched paths are not counted, so scanner traffic
-hitting random/unauthenticated paths doesn't skew the numbers. Backs the
-Telegram bot's daily reports and `/stats` command — see
-[Telegram monitoring bot](#telegram-monitoring-bot).
-
-```json
-{
-  "today": {"total": 42, "success": 39, "error": 3},
-  "totals": {"total": 1204, "success": 1140, "error": 64},
-  "days": {"2026-08-16": {"total": 55, "success": 50, "error": 5}, "...": "..."}
-}
-```
-
 ### Formats endpoint
 
 `GET /formats`
@@ -113,24 +94,6 @@ The response contains `source_file`, `bank`, `layout`,
 contain `client_account`, `transaction_date`, `document_number`,
 `credit_amount`, `debit_amount`, `counterparty_name`, `counterparty_account`,
 `bank_code`, and `payment_purpose`.
-
-### API security
-
-All application endpoints require the `X-API-Key` header. Configure the key
-on the server with `BSCONV_API_KEY`; the service fails closed if it is not
-configured.
-
-```bash
-export BSCONV_API_KEY='replace-with-a-long-random-secret'
-curl -H "X-API-Key: $BSCONV_API_KEY" \
-  -F "file=@statement.xlsx" \
-  "http://localhost:8000/convert/transactions"
-```
-
-Keep the key in a secret manager or protected deployment environment. Do not
-commit it to `.env`, source control, client-side code, or logs. Browser access
-is disabled by default; if a trusted frontend needs cross-origin access, set
-`BSCONV_CORS_ORIGINS` to a comma-separated allowlist of exact origins.
 
 ### Notes
 - The API contract is intentionally simple: upload a file and select one processing mode.
@@ -181,47 +144,12 @@ curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert?mode=auto"
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | liveness |
-| `GET /metrics` | daily/all-time call, success and error counts |
 | `GET /formats` | accepted formats, recognised banks |
 | `POST /convert` | one file → JSON |
 | `POST /convert/transactions` | one file → flat offline transactions |
 | `POST /convert/batch` | many files → keyed JSON |
 
 Query flags: `extended`, `include_empty`, `strict`.
-
----
-
-## Telegram monitoring bot
-
-`bsconv/telegram_bot.py` is a standalone process that watches the deployed
-API and reports to a Telegram chat:
-
-- polls `GET /health` on an interval and sends an alert the moment it goes
-  down, then another when it recovers (one message per state change, not
-  one per failed poll)
-- posts a daily usage report — today's and all-time call/success/error
-  counts, from `GET /metrics` — once a day
-- answers `/status` and `/stats` on demand from the configured chat(s)
-
-```bash
-pip install -r requirements-bot.txt   # httpx
-
-export TELEGRAM_BOT_TOKEN='123456:AA...'      # from @BotFather
-export TELEGRAM_CHAT_ID='123456789'           # chat/group id(s) to notify; comma-separated for several
-export BSCONV_API_BASE_URL='https://converter.khurshid.uz'
-export BSCONV_API_KEY="$BSCONV_API_KEY"       # same key the API requires
-export BSCONV_HEALTH_INTERVAL=60              # seconds between health checks (default 60)
-export BSCONV_DAILY_REPORT_HOUR=9             # UTC hour for the daily report (default 9)
-
-python -m bsconv.telegram_bot
-```
-
-Run it as its own long-lived process (systemd unit, separate container,
-`pm2`, etc.) alongside the API — it talks to the API purely over HTTP, so it
-doesn't need to share a filesystem or process with it. Metrics persist to a
-JSON file on the API host (`BSCONV_METRICS_FILE`, default
-`bsconv_metrics.json` in the working directory); mount that path as a
-volume in Docker if you want counts to survive container restarts.
 
 ---
 

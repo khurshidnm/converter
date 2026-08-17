@@ -17,7 +17,6 @@ dependencies = [
 [project.optional-dependencies]
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "python-multipart>=0.0.9"]
 ai = ["anthropic>=0.40"]
-bot = ["httpx>=0.27"]
 dev = ["pytest>=8.0", "httpx>=0.27"]
 
 [project.scripts]

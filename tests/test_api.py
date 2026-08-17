@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -11,18 +10,10 @@ import pytest
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-# Tests use a non-production key; deployments must provide BSCONV_API_KEY.
-TEST_API_KEY = "test-api-key"
-os.environ.setdefault("BSCONV_API_KEY", TEST_API_KEY)
-# Keep the module-level client's metrics out of the repo working directory.
-os.environ.setdefault(
-    "BSCONV_METRICS_FILE",
-    str(Path(tempfile.gettempdir()) / "bsconv_test_metrics.json"),
-)
 from bsconv.api import _choose_auto_mode, app  # noqa: E402
 
 SAMPLES = Path(os.environ.get("BSCONV_SAMPLES", Path(__file__).parent.parent / "samples"))
-client = TestClient(app, headers={"X-API-Key": TEST_API_KEY})
+client = TestClient(app)
 
 
 def _upload(name: str, endpoint: str = "/convert", **params):
@@ -39,28 +30,6 @@ def _upload(name: str, endpoint: str = "/convert", **params):
 
 def test_health():
     assert client.get("/health").json() == {"status": "ok"}
-
-
-def test_requests_require_api_key(monkeypatch):
-    monkeypatch.setenv("BSCONV_API_KEY", TEST_API_KEY)
-    unauthenticated_client = TestClient(app)
-    assert unauthenticated_client.get("/health").status_code == 401
-    assert unauthenticated_client.get(
-        "/health", headers={"X-API-Key": "wrong"}
-    ).status_code == 401
-
-
-def test_requests_fail_closed_when_api_key_is_not_configured(monkeypatch):
-    monkeypatch.delenv("BSCONV_API_KEY", raising=False)
-    assert client.get("/health").status_code == 503
-
-
-def test_openapi_declares_api_key_security():
-    schema = client.get("/openapi.json").json()
-    assert schema["components"]["securitySchemes"]["APIKeyHeader"]["name"] == "X-API-Key"
-    assert schema["paths"]["/convert/transactions"]["post"]["security"] == [
-        {"APIKeyHeader": []}
-    ]
 
 
 def test_formats_lists_inputs():
@@ -199,42 +168,3 @@ def test_rejects_empty_file():
     response = client.post("/convert", params={"mode": "offline"},
                            files={"file": ("empty.xlsx", b"")})
     assert response.status_code == 400
-
-
-def _metrics_client(monkeypatch, tmp_path):
-    """A client whose metrics are isolated to a scratch file for this test."""
-    monkeypatch.setenv("BSCONV_METRICS_FILE", str(tmp_path / "metrics.json"))
-    return TestClient(app, headers={"X-API-Key": TEST_API_KEY})
-
-
-def test_health_and_metrics_calls_are_not_counted(monkeypatch, tmp_path):
-    isolated = _metrics_client(monkeypatch, tmp_path)
-    isolated.get("/health")
-    isolated.get("/health")
-    body = isolated.get("/metrics").json()
-    assert body["today"] == {"total": 0, "success": 0, "error": 0}
-
-
-def test_metrics_counts_successful_and_failed_calls(monkeypatch, tmp_path):
-    isolated = _metrics_client(monkeypatch, tmp_path)
-    isolated.get("/formats")  # success
-    isolated.post("/convert", params={"mode": "offline"},
-                  files={"file": ("empty.xlsx", b"")})  # 400, counted as error
-    body = isolated.get("/metrics").json()
-    assert body["today"] == {"total": 2, "success": 1, "error": 1}
-    assert body["totals"] == body["today"]
-
-
-def test_metrics_ignores_unmatched_and_unauthenticated_scanner_traffic(monkeypatch, tmp_path):
-    isolated = _metrics_client(monkeypatch, tmp_path)
-    isolated.get("/wp-admin")  # 404, not a tracked application endpoint
-    unauthenticated = TestClient(app)
-    unauthenticated.get("/formats")  # 401, no key: rejected before real handling
-    body = isolated.get("/metrics").json()
-    assert body["today"] == {"total": 0, "success": 0, "error": 0}
-
-
-def test_metrics_requires_api_key(monkeypatch, tmp_path):
-    monkeypatch.setenv("BSCONV_METRICS_FILE", str(tmp_path / "metrics.json"))
-    unauthenticated_client = TestClient(app)
-    assert unauthenticated_client.get("/metrics").status_code == 401
