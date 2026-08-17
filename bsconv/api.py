@@ -4,6 +4,7 @@
 
 Endpoints
     GET  /health          liveness probe
+    GET  /metrics         daily/all-time call counts, for the Telegram bot
     GET  /formats         what the service accepts and which banks it knows
     POST /convert         upload one statement, get JSON back
     POST /convert/transactions
@@ -17,11 +18,15 @@ never has to guess whether it got one account or many: check "accounts".
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
@@ -52,6 +57,55 @@ MODE_ALIASES = {
     "model_auto": "auto",
     "rules": "offline",
 }
+
+METRICS_FILE_ENV = "BSCONV_METRICS_FILE"
+_METRICS_LOCK = threading.Lock()
+# An allowlist, not a blocklist: this is a public endpoint, so an allowlist
+# keeps internet scanner noise on random/unknown paths (404s, no API key)
+# out of the counts the Telegram bot reports as API health.
+_METRICS_TRACKED_PATHS = {"/formats", "/convert", "/convert/transactions", "/convert/batch"}
+_METRICS_RETENTION_DAYS = 90
+_EMPTY_DAY = {"total": 0, "success": 0, "error": 0}
+
+
+def _metrics_path() -> Path:
+    return Path(os.environ.get(METRICS_FILE_ENV, "bsconv_metrics.json"))
+
+
+def _load_metrics() -> dict[str, Any]:
+    path = _metrics_path()
+    try:
+        return json.loads(path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {"days": {}}
+
+
+def _save_metrics(data: dict[str, Any]) -> None:
+    path = _metrics_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(path)
+
+
+def _record_call(success: bool) -> None:
+    """Tally one convert/-family call into today's bucket in the metrics file.
+
+    Runs in a worker thread (see _track_metrics below) since it does blocking
+    file I/O; the lock only needs to guard against concurrent worker threads,
+    not the event loop itself.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with _METRICS_LOCK:
+        data = _load_metrics()
+        days = data.setdefault("days", {})
+        day = days.setdefault(today, dict(_EMPTY_DAY))
+        day["total"] += 1
+        day["success" if success else "error"] += 1
+        if len(days) > _METRICS_RETENTION_DAYS:
+            for key in sorted(days)[:-_METRICS_RETENTION_DAYS]:
+                del days[key]
+        _save_metrics(data)
 
 
 def require_api_key(api_key: str | None = Depends(api_key_header)) -> None:
@@ -172,6 +226,28 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def _track_metrics(request: Request, call_next):
+    """Count calls to the tracked application endpoints as success or error.
+
+    A 401 (missing/invalid X-API-Key) is not counted either way: it never
+    reached real request handling, so it's a rejected knock at the door, not
+    a use of the service - counting it would let unauthenticated scanner
+    traffic on real paths (e.g. POST /convert with no key) inflate the error
+    rate the Telegram bot reports.
+    """
+    if request.url.path not in _METRICS_TRACKED_PATHS:
+        return await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception:
+        await run_in_threadpool(_record_call, False)
+        raise
+    if response.status_code != 401:
+        await run_in_threadpool(_record_call, 200 <= response.status_code < 400)
+    return response
+
+
 def _payload(
     statement: Statement, *, extended: bool, include_empty: bool
 ) -> dict[str, Any]:
@@ -243,6 +319,24 @@ async def _read(upload: UploadFile) -> bytes:
 @app.get("/health")
 def health(_: None = Depends(require_api_key)) -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+def metrics(_: None = Depends(require_api_key)) -> dict[str, Any]:
+    """Daily and all-time call counts, consumed by the Telegram bot's reports."""
+    data = _load_metrics()
+    days = data.get("days", {})
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    totals = dict(_EMPTY_DAY)
+    for day in days.values():
+        totals["total"] += day["total"]
+        totals["success"] += day["success"]
+        totals["error"] += day["error"]
+    return {
+        "today": days.get(today, dict(_EMPTY_DAY)),
+        "totals": totals,
+        "days": days,
+    }
 
 
 @app.get("/formats")
