@@ -95,6 +95,24 @@ contain `client_account`, `transaction_date`, `document_number`,
 `credit_amount`, `debit_amount`, `counterparty_name`, `counterparty_account`,
 `bank_code`, and `payment_purpose`.
 
+### API security
+
+All application endpoints require the `X-API-Key` header. Configure the key
+on the server with `BSCONV_API_KEY`; the service fails closed if it is not
+configured.
+
+```bash
+export BSCONV_API_KEY='replace-with-a-long-random-secret'
+curl -H "X-API-Key: $BSCONV_API_KEY" \
+  -F "file=@statement.xlsx" \
+  "http://localhost:8000/convert/transactions"
+```
+
+Keep the key in a secret manager or protected deployment environment. Do not
+commit it to `.env`, source control, client-side code, or logs. Browser access
+is disabled by default; if a trusted frontend needs cross-origin access, set
+`BSCONV_CORS_ORIGINS` to a comma-separated allowlist of exact origins.
+
 ### Notes
 - The API contract is intentionally simple: upload a file and select one processing mode.
 - The app handles parsing and normalization internally.

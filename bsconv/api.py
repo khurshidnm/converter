@@ -18,11 +18,13 @@ never has to guess whether it got one account or many: check "accounts".
 from __future__ import annotations
 
 import os
+import secrets
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 from starlette.concurrency import run_in_threadpool
 
 from .engine import (
@@ -33,6 +35,9 @@ from .models import Statement
 from .vocabulary import BANK_FINGERPRINTS
 
 MAX_BYTES = 32 * 1024 * 1024
+API_KEY_ENV = "BSCONV_API_KEY"
+CORS_ORIGINS_ENV = "BSCONV_CORS_ORIGINS"
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 MODES = ("ai", "offline", "auto")
 LEGACY_ENGINE_ALIASES = {"rules": "offline", "auto": "auto"}
 MODE_ALIASES = {
@@ -47,6 +52,18 @@ MODE_ALIASES = {
     "model_auto": "auto",
     "rules": "offline",
 }
+
+
+def require_api_key(api_key: str | None = Depends(api_key_header)) -> None:
+    """Require the configured API key for every application endpoint."""
+    expected = os.environ.get(API_KEY_ENV, "").strip()
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="API authentication is not configured on the server.",
+        )
+    if not api_key or not secrets.compare_digest(api_key, expected):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key.")
 
 
 def _choose_auto_mode(data: bytes, filename: str) -> str:
@@ -144,7 +161,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        origin.strip()
+        for origin in os.environ.get(CORS_ORIGINS_ENV, "").split(",")
+        if origin.strip()
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -220,12 +241,12 @@ async def _read(upload: UploadFile) -> bytes:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+def health(_: None = Depends(require_api_key)) -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.get("/formats")
-def formats() -> dict[str, Any]:
+def formats(_: None = Depends(require_api_key)) -> dict[str, Any]:
     return {
         "input_formats": [".xlsx", ".xlsm", ".xls", ".xls (HTML)", ".htm",
                           ".html", ".csv", ".tsv"],
@@ -244,6 +265,7 @@ def formats() -> dict[str, Any]:
 @app.post("/convert")
 async def convert(
     file: UploadFile = File(..., description="Statement file"),
+    _: None = Depends(require_api_key),
     extended: bool = Query(False, description="Include name, period, balances, INN"),
     include_empty: bool = Query(False, description="Include zero-activity accounts"),
     strict: bool = Query(False, description="422 if reconciliation fails"),
@@ -302,6 +324,7 @@ async def convert(
 @app.post("/convert/transactions")
 async def convert_transactions(
     file: UploadFile = File(..., description="Statement file"),
+    _: None = Depends(require_api_key),
 ) -> JSONResponse:
     """Convert a statement to the flat, fully offline transaction schema."""
     data = await _read(file)
@@ -331,6 +354,7 @@ async def convert_transactions(
 @app.post("/convert/batch")
 async def convert_batch(
     files: list[UploadFile] = File(...),
+    _: None = Depends(require_api_key),
     extended: bool = Query(False),
     include_empty: bool = Query(False),
     mode: str | None = Query(

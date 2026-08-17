@@ -10,10 +10,13 @@ import pytest
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
+# Tests use a non-production key; deployments must provide BSCONV_API_KEY.
+TEST_API_KEY = "test-api-key"
+os.environ.setdefault("BSCONV_API_KEY", TEST_API_KEY)
 from bsconv.api import _choose_auto_mode, app  # noqa: E402
 
 SAMPLES = Path(os.environ.get("BSCONV_SAMPLES", Path(__file__).parent.parent / "samples"))
-client = TestClient(app)
+client = TestClient(app, headers={"X-API-Key": TEST_API_KEY})
 
 
 def _upload(name: str, endpoint: str = "/convert", **params):
@@ -30,6 +33,28 @@ def _upload(name: str, endpoint: str = "/convert", **params):
 
 def test_health():
     assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_requests_require_api_key(monkeypatch):
+    monkeypatch.setenv("BSCONV_API_KEY", TEST_API_KEY)
+    unauthenticated_client = TestClient(app)
+    assert unauthenticated_client.get("/health").status_code == 401
+    assert unauthenticated_client.get(
+        "/health", headers={"X-API-Key": "wrong"}
+    ).status_code == 401
+
+
+def test_requests_fail_closed_when_api_key_is_not_configured(monkeypatch):
+    monkeypatch.delenv("BSCONV_API_KEY", raising=False)
+    assert client.get("/health").status_code == 503
+
+
+def test_openapi_declares_api_key_security():
+    schema = client.get("/openapi.json").json()
+    assert schema["components"]["securitySchemes"]["APIKeyHeader"]["name"] == "X-API-Key"
+    assert schema["paths"]["/convert/transactions"]["post"]["security"] == [
+        {"APIKeyHeader": []}
+    ]
 
 
 def test_formats_lists_inputs():
