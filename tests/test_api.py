@@ -41,16 +41,30 @@ def test_health():
     assert client.get("/health").json() == {"status": "ok"}
 
 
-def test_requests_require_api_key(monkeypatch):
+def test_requests_do_not_require_an_api_key_by_default():
+    """Auth enforcement is temporarily opt-in; see BSCONV_REQUIRE_API_KEY."""
+    unauthenticated_client = TestClient(app)
+    assert unauthenticated_client.get("/health").status_code == 200
+    assert unauthenticated_client.get(
+        "/health", headers={"X-API-Key": "wrong"}
+    ).status_code == 200
+
+
+def test_requests_require_api_key_when_enforcement_is_enabled(monkeypatch):
+    monkeypatch.setenv("BSCONV_REQUIRE_API_KEY", "true")
     monkeypatch.setenv("BSCONV_API_KEY", TEST_API_KEY)
     unauthenticated_client = TestClient(app)
     assert unauthenticated_client.get("/health").status_code == 401
     assert unauthenticated_client.get(
         "/health", headers={"X-API-Key": "wrong"}
     ).status_code == 401
+    assert unauthenticated_client.get(
+        "/health", headers={"X-API-Key": TEST_API_KEY}
+    ).status_code == 200
 
 
-def test_requests_fail_closed_when_api_key_is_not_configured(monkeypatch):
+def test_requests_fail_closed_when_enabled_without_a_configured_key(monkeypatch):
+    monkeypatch.setenv("BSCONV_REQUIRE_API_KEY", "true")
     monkeypatch.delenv("BSCONV_API_KEY", raising=False)
     assert client.get("/health").status_code == 503
 
@@ -225,16 +239,24 @@ def test_metrics_counts_successful_and_failed_calls(monkeypatch, tmp_path):
     assert body["totals"] == body["today"]
 
 
-def test_metrics_ignores_unmatched_and_unauthenticated_scanner_traffic(monkeypatch, tmp_path):
+def test_metrics_ignores_unmatched_scanner_paths(monkeypatch, tmp_path):
     isolated = _metrics_client(monkeypatch, tmp_path)
     isolated.get("/wp-admin")  # 404, not a tracked application endpoint
+    body = isolated.get("/metrics").json()
+    assert body["today"] == {"total": 0, "success": 0, "error": 0}
+
+
+def test_metrics_ignores_unauthenticated_calls_when_enforcement_is_enabled(monkeypatch, tmp_path):
+    isolated = _metrics_client(monkeypatch, tmp_path)
+    monkeypatch.setenv("BSCONV_REQUIRE_API_KEY", "true")
     unauthenticated = TestClient(app)
     unauthenticated.get("/formats")  # 401, no key: rejected before real handling
     body = isolated.get("/metrics").json()
     assert body["today"] == {"total": 0, "success": 0, "error": 0}
 
 
-def test_metrics_requires_api_key(monkeypatch, tmp_path):
+def test_metrics_requires_api_key_when_enforcement_is_enabled(monkeypatch, tmp_path):
     monkeypatch.setenv("BSCONV_METRICS_FILE", str(tmp_path / "metrics.json"))
+    monkeypatch.setenv("BSCONV_REQUIRE_API_KEY", "true")
     unauthenticated_client = TestClient(app)
     assert unauthenticated_client.get("/metrics").status_code == 401

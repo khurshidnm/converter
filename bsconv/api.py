@@ -41,6 +41,7 @@ from .vocabulary import BANK_FINGERPRINTS
 
 MAX_BYTES = 32 * 1024 * 1024
 API_KEY_ENV = "BSCONV_API_KEY"
+REQUIRE_API_KEY_ENV = "BSCONV_REQUIRE_API_KEY"
 CORS_ORIGINS_ENV = "BSCONV_CORS_ORIGINS"
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 MODES = ("ai", "offline", "auto")
@@ -108,8 +109,19 @@ def _record_call(success: bool) -> None:
         _save_metrics(data)
 
 
+def _auth_required() -> bool:
+    return os.environ.get(REQUIRE_API_KEY_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def require_api_key(api_key: str | None = Depends(api_key_header)) -> None:
-    """Require the configured API key for every application endpoint."""
+    """Require the configured API key for every application endpoint.
+
+    Enforcement is temporarily opt-in via BSCONV_REQUIRE_API_KEY: the check
+    below is left intact and unchanged so auth can be turned back on for
+    everyone by setting that variable, with no code change needed.
+    """
+    if not _auth_required():
+        return
     expected = os.environ.get(API_KEY_ENV, "").strip()
     if not expected:
         raise HTTPException(

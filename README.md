@@ -116,12 +116,21 @@ contain `client_account`, `transaction_date`, `document_number`,
 
 ### API security
 
-All application endpoints require the `X-API-Key` header. Configure the key
-on the server with `BSCONV_API_KEY`; the service fails closed if it is not
-configured.
+**Currently disabled.** Every endpoint accepts requests with no `X-API-Key`
+at all for now — all application endpoints are open. The `X-API-Key`
+mechanism itself is still in place, just not enforced, so it can be turned
+back on for everyone with one server-side setting and no code change:
 
 ```bash
+export BSCONV_REQUIRE_API_KEY=true
 export BSCONV_API_KEY='replace-with-a-long-random-secret'
+```
+
+With `BSCONV_REQUIRE_API_KEY` set, the service goes back to requiring a
+matching `X-API-Key` header on every application endpoint, and fails closed
+(503) if `BSCONV_API_KEY` isn't configured:
+
+```bash
 curl -H "X-API-Key: $BSCONV_API_KEY" \
   -F "file=@statement.xlsx" \
   "http://localhost:8000/convert/transactions"
