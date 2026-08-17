@@ -79,6 +79,22 @@ curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert?mode=ai"
 curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert?mode=auto"
 ```
 
+### Flat transactions endpoint
+
+`POST /convert/transactions` always uses the local parser and does not accept
+or invoke the AI engine. It returns one flat `transactions` array; each item
+includes its owning account as `client_account`.
+
+```bash
+curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert/transactions"
+```
+
+The response contains `source_file`, `bank`, `layout`,
+`client_account_count`, `warnings`, and `transactions`. Its transaction items
+contain `client_account`, `transaction_date`, `document_number`,
+`credit_amount`, `debit_amount`, `counterparty_name`, `counterparty_account`,
+`bank_code`, and `payment_purpose`.
+
 ### Notes
 - The API contract is intentionally simple: upload a file and select one processing mode.
 - The app handles parsing and normalization internally.
@@ -130,6 +146,7 @@ curl -F "file=@statement.xlsx" "https://converter.khurshid.uz/convert?mode=auto"
 | `GET /health` | liveness |
 | `GET /formats` | accepted formats, recognised banks |
 | `POST /convert` | one file → JSON |
+| `POST /convert/transactions` | one file → flat offline transactions |
 | `POST /convert/batch` | many files → keyed JSON |
 
 Query flags: `extended`, `include_empty`, `strict`.

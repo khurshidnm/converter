@@ -6,6 +6,8 @@ Endpoints
     GET  /health          liveness probe
     GET  /formats         what the service accepts and which banks it knows
     POST /convert         upload one statement, get JSON back
+    POST /convert/transactions
+                         upload one statement, get a flat offline transaction list
     POST /convert/batch   upload several, get a keyed object back
 
 /convert returns, by default, the reference schema for the single active
@@ -19,6 +21,7 @@ import os
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -130,12 +133,21 @@ app = FastAPI(
         "Converts Uzbek bank statement exports to a normalised JSON schema. "
         "Use '?mode=ai', '?model=ai', '?mode=offline', '?model=offline', "
         "'?mode=auto', or '?model=auto' on the /convert endpoint. "
+        "Use /convert/transactions for the flat offline transaction schema. "
         "The values 'model-ai', 'model-offline', and 'model-auto' are also accepted."
     ),
     servers=[
-        {"url": "https://converter.khurshid.uz", "description": "Production"},
         {"url": "http://localhost:8000", "description": "Local development"},
+        {"url": "https://converter.khurshid.uz", "description": "Production"},
     ],
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -170,6 +182,31 @@ def _payload(
     return body
 
 
+def _transactions_payload(statement: Statement) -> dict[str, Any]:
+    """Build the flat, offline response used by /convert/transactions."""
+    accounts = statement.active_accounts
+    warnings = list(statement.warnings)
+    transactions: list[dict[str, Any]] = []
+    for account in accounts:
+        for transaction in account.transactions:
+            transactions.append({
+                "client_account": account.account_number,
+                **transaction.to_json(),
+            })
+        for warning in account.warnings:
+            if warning not in warnings:
+                warnings.append(warning)
+
+    return {
+        "source_file": statement.source_file,
+        "bank": statement.bank,
+        "layout": statement.layout,
+        "client_account_count": len(accounts),
+        "warnings": warnings,
+        "transactions": transactions,
+    }
+
+
 async def _read(upload: UploadFile) -> bytes:
     data = await upload.read()
     if not data:
@@ -199,7 +236,8 @@ def formats() -> dict[str, Any]:
                 "'?mode=auto', or '?model=auto'. The values 'model-ai', 'model-offline', and "
                 "'model-auto' are also accepted. Auto uses the local parser for simple files and escalates "
                 "to Claude only for harder inputs. The offline path uses the local parser without an API key; "
-                "the AI path uses Claude and requires ANTHROPIC_API_KEY.",
+            "the AI path uses Claude and requires ANTHROPIC_API_KEY. "
+            "POST /convert/transactions always uses the local parser and returns a flat transaction list.",
     }
 
 
@@ -259,6 +297,35 @@ async def convert(
     if strict and body["reconciliation"]["status"] == "fail":
         status = 422
     return JSONResponse(content=body, status_code=status)
+
+
+@app.post("/convert/transactions")
+async def convert_transactions(
+    file: UploadFile = File(..., description="Statement file"),
+) -> JSONResponse:
+    """Convert a statement to the flat, fully offline transaction schema."""
+    data = await _read(file)
+    filename = file.filename or "upload"
+    try:
+        statement = await run_in_threadpool(
+            parse_file, data, filename,
+            name_style=DEFAULT_NAME_STYLE, default_currency="UZS",
+        )
+    except UnsupportedFileError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not parse {filename}: {type(exc).__name__}: {exc}",
+        ) from exc
+
+    body = _transactions_payload(statement)
+    if not body["transactions"]:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No transactions found in {filename}.",
+        )
+    return JSONResponse(content=body)
 
 
 @app.post("/convert/batch")

@@ -16,7 +16,7 @@ SAMPLES = Path(os.environ.get("BSCONV_SAMPLES", Path(__file__).parent.parent / "
 client = TestClient(app)
 
 
-def _upload(name: str, **params):
+def _upload(name: str, endpoint: str = "/convert", **params):
     """Upload a sample using an explicit mode. Offline mode is the default
     path for parsing tests; AI mode requires an API key and network."""
     path = SAMPLES / name
@@ -24,7 +24,7 @@ def _upload(name: str, **params):
         pytest.skip(f"sample {name} not available")
     params.setdefault("mode", "offline")
     with open(path, "rb") as fh:
-        return client.post("/convert", params=params,
+        return client.post(endpoint, params=params,
                            files={"file": (name, fh.read())})
 
 
@@ -45,6 +45,24 @@ def test_convert_single_account():
     assert body["account"]["transaction_count"] == 127
     assert body["reconciliation"]["status"] == "pass"
     assert len(body["accounts"]) == 1
+
+
+def test_convert_transactions_returns_flat_offline_schema():
+    response = _upload("aloqabank.xlsx", endpoint="/convert/transactions")
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {
+        "source_file", "bank", "layout", "client_account_count",
+        "warnings", "transactions",
+    }
+    assert body["client_account_count"] == 1
+    assert len(body["transactions"]) == 127
+    assert set(body["transactions"][0]) == {
+        "client_account", "transaction_date", "document_number",
+        "credit_amount", "debit_amount", "counterparty_name",
+        "counterparty_account", "bank_code", "payment_purpose",
+    }
+    assert body["transactions"][0]["client_account"]
 
 
 def test_convert_multi_account():
