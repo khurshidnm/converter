@@ -19,6 +19,7 @@ never has to guess whether it got one account or many: check "accounts".
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import threading
@@ -31,6 +32,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 from starlette.concurrency import run_in_threadpool
+
+logger = logging.getLogger(__name__)
 
 from .engine import (
     DEFAULT_NAME_STYLE, NAME_STYLE_CLEAN, NAME_STYLE_COMPOSITE, parse_file,
@@ -107,6 +110,19 @@ def _record_call(success: bool) -> None:
             for key in sorted(days)[:-_METRICS_RETENTION_DAYS]:
                 del days[key]
         _save_metrics(data)
+
+
+def _record_call_safely(success: bool) -> None:
+    """Wraps _record_call so a metrics failure (e.g. a read-only or
+    unwritable working directory in the deploy environment) degrades to a
+    log line instead of turning every real request into a 500. Usage
+    metrics are a nice-to-have; they must never be able to take the
+    conversion API down.
+    """
+    try:
+        _record_call(success)
+    except Exception:
+        logger.warning("Failed to record API call metrics", exc_info=True)
 
 
 def _auth_required() -> bool:
@@ -253,10 +269,10 @@ async def _track_metrics(request: Request, call_next):
     try:
         response = await call_next(request)
     except Exception:
-        await run_in_threadpool(_record_call, False)
+        await run_in_threadpool(_record_call_safely, False)
         raise
     if response.status_code != 401:
-        await run_in_threadpool(_record_call, 200 <= response.status_code < 400)
+        await run_in_threadpool(_record_call_safely, 200 <= response.status_code < 400)
     return response
 
 

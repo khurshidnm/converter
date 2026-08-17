@@ -19,6 +19,7 @@ os.environ.setdefault(
     "BSCONV_METRICS_FILE",
     str(Path(tempfile.gettempdir()) / "bsconv_test_metrics.json"),
 )
+import bsconv.api as api_module  # noqa: E402
 from bsconv.api import _choose_auto_mode, app  # noqa: E402
 
 SAMPLES = Path(os.environ.get("BSCONV_SAMPLES", Path(__file__).parent.parent / "samples"))
@@ -253,6 +254,18 @@ def test_metrics_ignores_unauthenticated_calls_when_enforcement_is_enabled(monke
     unauthenticated.get("/formats")  # 401, no key: rejected before real handling
     body = isolated.get("/metrics").json()
     assert body["today"] == {"total": 0, "success": 0, "error": 0}
+
+
+def test_a_metrics_write_failure_does_not_break_the_request(monkeypatch, tmp_path):
+    """Regression test: an unwritable metrics file (e.g. read-only deploy
+    filesystem) must degrade to a log line, not a 500 on every real call."""
+    isolated = _metrics_client(monkeypatch, tmp_path)
+
+    def _boom(data):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(api_module, "_save_metrics", _boom)
+    assert isolated.get("/formats").status_code == 200
 
 
 def test_metrics_requires_api_key_when_enforcement_is_enabled(monkeypatch, tmp_path):
