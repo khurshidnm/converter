@@ -18,6 +18,7 @@ import csv
 import io
 import os
 import re
+import zipfile
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
@@ -110,17 +111,53 @@ def sniff_format(data: bytes, filename: str = "") -> str:
 # per-format loaders
 # --------------------------------------------------------------------------
 
+def _col_letters_to_index(letters: str) -> int:
+    """'A' -> 0, 'B' -> 1, ..., 'Z' -> 25, 'AA' -> 26, ..."""
+    n = 0
+    for ch in letters:
+        n = n * 26 + (ord(ch) - ord("A") + 1)
+    return n - 1
+
+
+def _merged_ranges(data: bytes, worksheet_path: str | None) -> list[tuple[int, int, int, int]]:
+    """Read <mergeCells> straight from the sheet XML.
+
+    Read-only worksheets expose no merged-cell API at all (ws.merged_cells
+    doesn't exist), so this bypasses openpyxl for just this one piece, using
+    the archive path openpyxl itself resolved for the worksheet. Returns
+    0-indexed (min_row, min_col, max_row, max_col) tuples; degrades to no
+    merges found rather than raising if the path is missing or unreadable.
+    """
+    if not worksheet_path:
+        return []
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            xml = z.read(worksheet_path).decode("utf-8", errors="replace")
+    except (KeyError, zipfile.BadZipFile, OSError):
+        return []
+    ranges = []
+    for m in re.finditer(r'<mergeCell ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"', xml):
+        c1, r1, c2, r2 = m.groups()
+        ranges.append((int(r1) - 1, _col_letters_to_index(c1),
+                       int(r2) - 1, _col_letters_to_index(c2)))
+    return ranges
+
+
 def _load_xlsx(data: bytes) -> list[Grid]:
     import openpyxl
 
-    wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True, read_only=False)
+    wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True, read_only=True)
     grids: list[Grid] = []
     for ws in wb.worksheets:
-        merged = list(ws.merged_cells.ranges)
-        rows = [
-            [ws.cell(r, c).value for c in range(1, (ws.max_column or 0) + 1)]
-            for r in range(1, (ws.max_row or 0) + 1)
-        ]
+        # Some exports declare a bogus <dimension> (seen as low as "A1" on a
+        # real 19k-row, 3MB export) that read-only mode trusts by default,
+        # silently truncating the sheet to almost nothing. Force a real scan
+        # of the XML instead of trusting that tag.
+        ws.reset_dimensions()
+        rows = [[cell.value for cell in row] for row in ws.iter_rows()]
+        width = max((len(r) for r in rows), default=0)
+        rows = [r + [None] * (width - len(r)) for r in rows]
+
         # Merged cells carry their value only in the top-left cell. Spread it
         # HORIZONTALLY so a header label sitting in a merged range is visible
         # in the column its data actually occupies.
@@ -128,16 +165,15 @@ def _load_xlsx(data: bytes) -> list[Grid]:
         # Vertical spreading is deliberately NOT done: layouts that merge a
         # cell down several rows (Ipak Yo'li, Ipoteka) would turn one
         # transaction into two or three identical-looking data rows.
-        for rng in merged:
-            value = ws.cell(rng.min_row, rng.min_col).value
-            if value is None:
-                continue
-            r = rng.min_row - 1
+        for (r, c1, _r2, c2) in _merged_ranges(data, getattr(ws, "_worksheet_path", None)):
             if not (0 <= r < len(rows)):
                 continue
-            for c in range(rng.min_col, rng.max_col + 1):
-                if 0 <= c - 1 < len(rows[r]) and rows[r][c - 1] is None:
-                    rows[r][c - 1] = value
+            value = rows[r][c1] if c1 < len(rows[r]) else None
+            if value is None:
+                continue
+            for c in range(c1, c2 + 1):
+                if c < len(rows[r]) and rows[r][c] is None:
+                    rows[r][c] = value
         grids.append(Grid(rows=rows, sheet_name=ws.title, source_format="xlsx"))
     wb.close()
     return grids
